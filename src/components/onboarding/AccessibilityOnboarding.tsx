@@ -44,6 +44,7 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorCountRef = useRef<number>(0);
+  const hasRevealedAfterMicrophoneGrant = useRef(false);
   const MAX_POLLING_ERRORS = 3;
 
   const isMacOS = permissionPlatform === "macos";
@@ -62,6 +63,14 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
     await Promise.all([refreshAudioDevices(), refreshOutputDevices()]);
     timeoutRef.current = setTimeout(() => onComplete(), 300);
   }, [onComplete, refreshAudioDevices, refreshOutputDevices]);
+
+  const revealMainWindow = useCallback(async () => {
+    try {
+      await commands.showMainWindowCommand();
+    } catch (e) {
+      console.warn("Failed to show permission onboarding window:", e);
+    }
+  }, []);
 
   const hasWindowsMicrophoneAccess = useCallback(async (): Promise<boolean> => {
     const microphoneStatus =
@@ -121,6 +130,8 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
 
           if (accessibilityGranted && microphoneGranted) {
             await completeOnboarding();
+          } else if (microphoneGranted && !accessibilityGranted) {
+            await revealMainWindow();
           }
         } catch (error) {
           console.error("Failed to check macOS permissions:", error);
@@ -156,7 +167,13 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
     };
 
     checkInitial();
-  }, [completeOnboarding, hasWindowsMicrophoneAccess, onComplete, t]);
+  }, [
+    completeOnboarding,
+    hasWindowsMicrophoneAccess,
+    onComplete,
+    revealMainWindow,
+    t,
+  ]);
 
   // Polling for permissions after user clicks a button
   const startPolling = useCallback(() => {
@@ -208,6 +225,15 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
           return newState;
         });
 
+        if (
+          microphoneGranted &&
+          !accessibilityGranted &&
+          !hasRevealedAfterMicrophoneGrant.current
+        ) {
+          hasRevealedAfterMicrophoneGrant.current = true;
+          void revealMainWindow();
+        }
+
         // If both granted, stop polling, refresh audio devices, and proceed
         if (accessibilityGranted && microphoneGranted) {
           if (pollingRef.current) {
@@ -233,7 +259,13 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
         }
       }
     }, 1000);
-  }, [completeOnboarding, hasWindowsMicrophoneAccess, permissionPlatform, t]);
+  }, [
+    completeOnboarding,
+    hasWindowsMicrophoneAccess,
+    permissionPlatform,
+    revealMainWindow,
+    t,
+  ]);
 
   // Cleanup polling and timeouts on unmount
   useEffect(() => {
@@ -264,6 +296,10 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
         await commands.openMicrophonePrivacySettings();
       } else {
         await requestMicrophonePermission();
+        void revealMainWindow();
+        setTimeout(() => {
+          void revealMainWindow();
+        }, 300);
       }
 
       setPermissions((prev) => ({ ...prev, microphone: "waiting" }));
